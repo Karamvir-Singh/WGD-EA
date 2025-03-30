@@ -3,10 +3,25 @@
 
 #include <FVG.mqh>
 
+// Use enum instead of strings for better performance
+enum FVG_TYPE {
+   FVG_BULLISH,
+   FVG_BEARISH
+};
+
+struct FVG_Optimized {
+   double high;
+   double low;
+   FVG_TYPE type;
+   datetime start_time;
+   datetime end_time;
+   bool active;
+};
+
 struct GG {
    double high;
    double low;
-   string type;
+   string type;       // Changed back to string to maintain compatibility
    datetime start_time;
    datetime end_time;
    bool active;
@@ -20,226 +35,134 @@ void DetectGuruGaps(string symbol, GG &ggs[], int &ggCount,
                       ENUM_TIMEFRAMES ltf = PERIOD_M5,
                       int days_to_look_back = 30) {
    
-   // Initialize array if this is first run
+   // Initialize array
    if(ArraySize(ggs) == 0) {
       ggCount = 0;
    }
    
-   // Calculate the approximate number of bars for the specified days based on the timeframe
-   int minutes_per_bar_ltf = PeriodSeconds(ltf) / 60;
-   int trading_minutes_per_day = 24 * 60; // Assume 24-hour trading for forex
-   int bars_per_day_ltf = trading_minutes_per_day / minutes_per_bar_ltf;
-   int total_bars_to_check_ltf = bars_per_day_ltf * days_to_look_back;
-   
-   // Cap at a reasonable maximum (50,000 bars)
-   if(total_bars_to_check_ltf > 50000) {
-      Print("Warning: Requested ", total_bars_to_check_ltf, " LTF bars which is too many. Limiting to 50,000.");
-      total_bars_to_check_ltf = 50000;
-   }
-   
-   // Ensure we don't try to access more bars than are available
-   int available_bars_ltf = Bars(symbol, ltf);
-   if(total_bars_to_check_ltf > available_bars_ltf - 3) {
-      Print("Note: Requested ", total_bars_to_check_ltf, " LTF bars but only ", available_bars_ltf - 3, " are available.");
-      total_bars_to_check_ltf = available_bars_ltf - 3;
-   }
-   
-   Print("Processing ", total_bars_to_check_ltf, " LTF bars for analysis");
-   
-   // Arrays to store our FVGs
+   // Step 1: Detect all HTF FVGs
    FVG htf_fvgs[];
    int htf_fvgCount = 0;
+   Print("Detecting HTF FVGs...");
+   DetectFVGs(symbol, htf, htf_fvgs, htf_fvgCount, days_to_look_back);
+   Print("Detected ", htf_fvgCount, " HTF FVGs");
    
+   // Step 2: Detect all LTF FVGs
    FVG ltf_fvgs[];
    int ltf_fvgCount = 0;
+   Print("Detecting LTF FVGs...");
+   DetectFVGs(symbol, ltf, ltf_fvgs, ltf_fvgCount, days_to_look_back);
+   Print("Detected ", ltf_fvgCount, " LTF FVGs");
    
-   // Variables to track HTF bar changes
-   datetime current_htf_time = 0;
+   // Pre-allocate array for GGs (estimated size)
+   int estimated_ggs = MathMin(htf_fvgCount, ltf_fvgCount);
+   ArrayResize(ggs, estimated_ggs);
+   ggCount = 0;
    
-   // Process all LTF bars in chronological order
-   for(int i = total_bars_to_check_ltf + 2; i >= 0; i--) {
-      // Get current LTF bar data
-      datetime ltf_time = iTime(symbol, ltf, i);
-      double ltf_high = iHigh(symbol, ltf, i);
-      double ltf_low = iLow(symbol, ltf, i);
-      double ltf_close = iClose(symbol, ltf, i);
-      
-      // Determine current HTF bar
-      int htf_shift = iBarShift(symbol, htf, ltf_time);
-      datetime htf_time = iTime(symbol, htf, htf_shift);
-      
-      // Check if this is a new HTF bar
-      bool new_htf_bar = (htf_time != current_htf_time);
-      
-      // If we have a new HTF bar and had a previous one, check for HTF FVG
-      if(new_htf_bar && current_htf_time != 0) {
-         // We need at least 3 HTF bars to detect an FVG (current + 2 previous)
-         // Since htf_shift is now the index of the current HTF bar, we check if htf_shift+2 is valid
-         if(htf_shift + 2 < Bars(symbol, htf)) {
-            double htf_high0 = iHigh(symbol, htf, htf_shift);
-            double htf_low0 = iLow(symbol, htf, htf_shift);
-            double htf_high2 = iHigh(symbol, htf, htf_shift + 2);
-            double htf_low2 = iLow(symbol, htf, htf_shift + 2);
-            
-            // Check for bullish HTF FVG
-            if(htf_low0 > htf_high2) {
-               ArrayResize(htf_fvgs, htf_fvgCount + 1);
-               htf_fvgs[htf_fvgCount].high = htf_low0;
-               htf_fvgs[htf_fvgCount].low = htf_high2;
-               htf_fvgs[htf_fvgCount].type = "Bullish";
-               htf_fvgs[htf_fvgCount].start_time = htf_time;
-               htf_fvgs[htf_fvgCount].end_time = ltf_time; // temp end time
-               htf_fvgs[htf_fvgCount].active = true;
-               htf_fvgCount++;
-            }
-            
-            // Check for bearish HTF FVG
-            if(htf_high0 < htf_low2) {
-               ArrayResize(htf_fvgs, htf_fvgCount + 1);
-               htf_fvgs[htf_fvgCount].high = htf_low2;
-               htf_fvgs[htf_fvgCount].low = htf_high0;
-               htf_fvgs[htf_fvgCount].type = "Bearish";
-               htf_fvgs[htf_fvgCount].start_time = htf_time;
-               htf_fvgs[htf_fvgCount].end_time = ltf_time; // temp end time
-               htf_fvgs[htf_fvgCount].active = true;
-               htf_fvgCount++;
-            }
-         }
-      }
-      
-      // Update current HTF time
-      current_htf_time = htf_time;
-      
-      // Check for LTF FVG if we have at least 3 LTF bars
-      if(i <= total_bars_to_check_ltf - 2) {
-         double ltf_high2 = iHigh(symbol, ltf, i+2);
-         double ltf_low2 = iLow(symbol, ltf, i+2);
-         
-         // Check for bullish LTF FVG
-         if(ltf_low > ltf_high2) {
-            ArrayResize(ltf_fvgs, ltf_fvgCount + 1);
-            ltf_fvgs[ltf_fvgCount].high = ltf_low;
-            ltf_fvgs[ltf_fvgCount].low = ltf_high2;
-            ltf_fvgs[ltf_fvgCount].type = "Bullish";
-            ltf_fvgs[ltf_fvgCount].start_time = ltf_time;
-            ltf_fvgs[ltf_fvgCount].end_time = ltf_time; // temp end time
-            ltf_fvgs[ltf_fvgCount].active = true;
-            ltf_fvgCount++;
-         }
-         
-         // Check for bearish LTF FVG
-         if(ltf_high < ltf_low2) {
-            ArrayResize(ltf_fvgs, ltf_fvgCount + 1);
-            ltf_fvgs[ltf_fvgCount].high = ltf_low2;
-            ltf_fvgs[ltf_fvgCount].low = ltf_high;
-            ltf_fvgs[ltf_fvgCount].type = "Bearish";
-            ltf_fvgs[ltf_fvgCount].start_time = ltf_time;
-            ltf_fvgs[ltf_fvgCount].end_time = ltf_time; // temp end time
-            ltf_fvgs[ltf_fvgCount].active = true;
-            ltf_fvgCount++;
-         }
-      }
-      
-      // Update active/inactive status of existing FVGs based on price action
-      // First, check LTF FVGs
-      for(int j = 0; j < ltf_fvgCount; j++) {
-         if(ltf_fvgs[j].active && ltf_fvgs[j].start_time < ltf_time) {
-            // For Bullish FVGs, close if a candle's close is below the FVG's low
-            if(ltf_fvgs[j].type == "Bullish" && ltf_close < ltf_fvgs[j].low) {
-               ltf_fvgs[j].active = false;
-               ltf_fvgs[j].end_time = ltf_time;
-            }
-            // For Bearish FVGs, close if a candle's close is above the FVG's high
-            else if(ltf_fvgs[j].type == "Bearish" && ltf_close > ltf_fvgs[j].high) {
-               ltf_fvgs[j].active = false;
-               ltf_fvgs[j].end_time = ltf_time;
-            }
-         }
-      }
-      
-      // Then, check HTF FVGs
-      for(int j = 0; j < htf_fvgCount; j++) {
-         if(htf_fvgs[j].active && htf_fvgs[j].start_time < ltf_time) {
-            // For Bullish FVGs, close if a candle's close is below the FVG's low
-            if(htf_fvgs[j].type == "Bullish" && ltf_close < htf_fvgs[j].low) {
-               htf_fvgs[j].active = false;
-               htf_fvgs[j].end_time = ltf_time;
-            }
-            // For Bearish FVGs, close if a candle's close is above the FVG's high
-            else if(htf_fvgs[j].type == "Bearish" && ltf_close > htf_fvgs[j].high) {
-               htf_fvgs[j].active = false;
-               htf_fvgs[j].end_time = ltf_time;
-            }
-         }
-      }
-      
-      // Check for GG formations - intersections between LTF and HTF FVGs
-      // We use farthest start_time between LTF and HTF for GG start_time
+   // Step 3: Find intersections between HTF and LTF FVGs (Guru Gaps)
+   Print("Finding Guru Gaps (intersections)...");
+   for(int h = 0; h < htf_fvgCount; h++) {
       for(int l = 0; l < ltf_fvgCount; l++) {
-         for(int h = 0; h < htf_fvgCount; h++) {
-            // Check if both FVGs exist at this point in time and are the same type
-            if(ltf_fvgs[l].start_time <= ltf_time && 
-               htf_fvgs[h].start_time <= ltf_time && 
-               ltf_fvgs[l].type == htf_fvgs[h].type) {
-               
-               // Check if a GG with these FVGs already exists
-               bool gg_exists = false;
-               for(int g = 0; g < ggCount; g++) {
-                  if(ggs[g].htf_start_time == htf_fvgs[h].start_time && 
-                     ggs[g].ltf_start_time == ltf_fvgs[l].start_time) {
-                     gg_exists = true;
-                     break;
-                  }
-               }
-               
-               // If no GG exists with these FVGs, check for price overlap
-               if(!gg_exists) {
-                  double intersection_high = MathMin(htf_fvgs[h].high, ltf_fvgs[l].high);
-                  double intersection_low = MathMax(htf_fvgs[h].low, ltf_fvgs[l].low);
-                  
-                  // If intersection_high > intersection_low, we have an overlap
-                  if(intersection_high > intersection_low) {
-                     // Determine active status - GG is active if both FVGs are active
-                     bool is_active = htf_fvgs[h].active && ltf_fvgs[l].active;
-                     
-                     // Create new GG
-                     ArrayResize(ggs, ggCount + 1);
-                     ggs[ggCount].high = intersection_high;
-                     ggs[ggCount].low = intersection_low;
-                     ggs[ggCount].type = htf_fvgs[h].type; // Same as LTF FVG type
-                     // Start time is the later of the two FVG start times
-                     ggs[ggCount].start_time = MathMax(htf_fvgs[h].start_time, ltf_fvgs[l].start_time);
-                     ggs[ggCount].end_time = ltf_time; // Set end time to current bar initially
-                     ggs[ggCount].active = is_active;
-                     ggs[ggCount].htf_start_time = htf_fvgs[h].start_time;
-                     ggs[ggCount].ltf_start_time = ltf_fvgs[l].start_time;
-                     ggCount++;
-                  }
-               }
-            }
-         }
-      }
-      
-      // Update GG closures
-      for(int g = 0; g < ggCount; g++) {
-         // Only check active GGs that started before this bar
-         if(ggs[g].active && ggs[g].start_time < ltf_time) {
-            // Update end time for active GGs
-            ggs[g].end_time = ltf_time;
+         // Only process FVGs of the same type
+         if(htf_fvgs[h].type == ltf_fvgs[l].type) {
             
-            // For Bullish GGs, close if a candle's close is below the GG's low
-            if(ggs[g].type == "Bullish" && ltf_close < ggs[g].low) {
-               ggs[g].active = false;
-            }
-            // For Bearish GGs, close if a candle's close is above the GG's high
-            else if(ggs[g].type == "Bearish" && ltf_close > ggs[g].high) {
-               ggs[g].active = false;
+            // Calculate the potential intersection
+            double intersection_high = MathMin(htf_fvgs[h].high, ltf_fvgs[l].high);
+            double intersection_low = MathMax(htf_fvgs[h].low, ltf_fvgs[l].low);
+            
+            // Check if there's an actual price overlap
+            if(intersection_high > intersection_low) {
+               // Determine when this GG starts - latest of the two FVG start times
+               datetime gg_start = MathMax(htf_fvgs[h].start_time, ltf_fvgs[l].start_time);
+               
+               // For a GG to exist, both FVGs must exist at the same time
+               // If one FVG ends before the other starts, there's no GG
+               if(htf_fvgs[h].end_time >= ltf_fvgs[l].start_time && 
+                  ltf_fvgs[l].end_time >= htf_fvgs[h].start_time) {
+                  
+                  // Resize GG array if needed
+                  if(ggCount >= ArraySize(ggs)) {
+                     ArrayResize(ggs, ArraySize(ggs) + 50);
+                  }
+                  
+                  // Determine if GG is active - it's active if both FVGs are active
+                  bool is_active = htf_fvgs[h].active && ltf_fvgs[l].active;
+                  
+                  // Set end time to the earliest end time of either component FVG
+                  datetime gg_end = MathMin(htf_fvgs[h].end_time, ltf_fvgs[l].end_time);
+                  
+                  // Create new GG
+                  ggs[ggCount].high = intersection_high;
+                  ggs[ggCount].low = intersection_low;
+                  ggs[ggCount].type = htf_fvgs[h].type; // Same as component FVGs
+                  ggs[ggCount].start_time = gg_start;
+                  ggs[ggCount].end_time = gg_end;
+                  ggs[ggCount].active = is_active;
+                  ggs[ggCount].htf_start_time = htf_fvgs[h].start_time;
+                  ggs[ggCount].ltf_start_time = ltf_fvgs[l].start_time;
+                  ggCount++;
+               }
             }
          }
       }
    }
    
-   Print("Detected ", ltf_fvgCount, " LTF FVGs, ", htf_fvgCount, " HTF FVGs, and ", ggCount, " Guru Gaps");
+   // Step 4: Load price data for checking GG closures
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+   
+   // Get the earliest GG start time and latest end time
+   datetime earliest_time = TimeCurrent();
+   datetime latest_time = 0;
+   
+   for(int g = 0; g < ggCount; g++) {
+      if(ggs[g].start_time < earliest_time) earliest_time = ggs[g].start_time;
+      if(ggs[g].end_time > latest_time) latest_time = ggs[g].end_time;
+   }
+   
+   // Load all necessary price bars (from earliest GG to now)
+   int bars_to_load = iBarShift(symbol, ltf, earliest_time) + 10; // Add buffer
+   int copied = CopyRates(symbol, ltf, 0, bars_to_load, rates);
+   
+   if(copied <= 0) {
+      Print("Error copying rates data for GG closure checking: ", GetLastError());
+   } else {
+      Print("Checking closures for ", ggCount, " Guru Gaps...");
+      
+      // Process GG closures
+      for(int g = 0; g < ggCount; g++) {
+         // Only need to check active GGs
+         if(ggs[g].active) {
+            // Find the first bar that matches or is after the GG start time
+            int start_bar = iBarShift(symbol, ltf, ggs[g].start_time, false);
+            
+            // Process each bar from GG start to current time
+            for(int i = start_bar; i >= 0; i--) {
+               double close = rates[i].close;
+               datetime time = rates[i].time;
+               
+               // Update end time for active GGs
+               if(time > ggs[g].end_time) {
+                  ggs[g].end_time = time;
+               }
+               
+               // Check if this candle closes the GG
+               if(ggs[g].type == "Bullish" && close < ggs[g].low) {
+                  ggs[g].active = false;
+                  ggs[g].end_time = time;
+                  break; // No need to check further bars
+               }
+               else if(ggs[g].type == "Bearish" && close > ggs[g].high) {
+                  ggs[g].active = false;
+                  ggs[g].end_time = time;
+                  break; // No need to check further bars
+               }
+            }
+         }
+      }
+   }
+   
+   Print("Detected ", ggCount, " Guru Gaps in total");
 }
 
 void PlotGG(GG &gg, int index) {
