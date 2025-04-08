@@ -1,6 +1,39 @@
 #ifndef FVG_MQH
 #define FVG_MQH
 
+// Debug mode flag - can be set by the calling code
+static bool g_FVG_DebugMode = false;
+
+//+------------------------------------------------------------------+
+//| Set debug mode for FVG module                                     |
+//+------------------------------------------------------------------+
+void FVG_SetDebugMode(bool debugMode) {
+   g_FVG_DebugMode = debugMode;
+}
+
+//+------------------------------------------------------------------+
+//| Get current debug mode state                                      |
+//+------------------------------------------------------------------+
+bool FVG_GetDebugMode() {
+   return g_FVG_DebugMode;
+}
+
+//+------------------------------------------------------------------+
+//| Custom debug print function - only outputs when debug is enabled  |
+//+------------------------------------------------------------------+
+void FVG_DebugPrint(string message) {
+   if(g_FVG_DebugMode) {
+      Print(message);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Always print function - for critical messages regardless of debug |
+//+------------------------------------------------------------------+
+void FVG_InfoPrint(string message) {
+   Print(message);
+}
+
 struct FVG {
    double high;
    double low;
@@ -28,14 +61,15 @@ void DetectFVGs(string symbol, ENUM_TIMEFRAMES timeframe, FVG &fvgs[], int &fvgC
    
    // Cap at a reasonable maximum (50,000 bars)
    if(total_bars_to_check > 50000) {
-      Print("Warning: Requested ", total_bars_to_check, " bars which is too many. Limiting to 50,000.");
+      FVG_DebugPrint("Warning: Requested " + IntegerToString(total_bars_to_check) + " bars which is too many. Limiting to 50,000.");
       total_bars_to_check = 50000;
    }
    
    // Ensure we don't try to access more bars than are available
    int available_bars = Bars(symbol, timeframe);
    if(total_bars_to_check > available_bars - 3) {
-      Print("Note: Requested ", total_bars_to_check, " bars but only ", available_bars - 3, " are available.");
+      FVG_DebugPrint("Note: Requested " + IntegerToString(total_bars_to_check) + " bars but only " + 
+                  IntegerToString(available_bars - 3) + " are available.");
       total_bars_to_check = available_bars - 3;
    }
    
@@ -46,12 +80,12 @@ void DetectFVGs(string symbol, ENUM_TIMEFRAMES timeframe, FVG &fvgs[], int &fvgC
    int copied = CopyRates(symbol, timeframe, 0, total_bars_to_check + 3, rates);
    
    if(copied <= 0) {
-      Print("Error copying rates data: ", GetLastError());
+      FVG_InfoPrint("Error copying rates data: " + IntegerToString(GetLastError()));
       return;
    }
    
-   Print("Successfully loaded ", copied, " bars for analysis.");
-   Print("Date range: ", TimeToString(rates[0].time), " to ", TimeToString(rates[copied-1].time));
+   FVG_DebugPrint("Successfully loaded " + IntegerToString(copied) + " bars for analysis.");
+   FVG_DebugPrint("Date range: " + TimeToString(rates[0].time) + " to " + TimeToString(rates[copied-1].time));
    
    // Process each bar in chronological order (oldest to newest)
    // Starting from bar 2 since we need 2 bars before to check for FVG
@@ -109,12 +143,12 @@ void DetectFVGs(string symbol, ENUM_TIMEFRAMES timeframe, FVG &fvgs[], int &fvgC
       }
    }
    
-   Print("Detected ", fvgCount, " FVGs in total");
+   FVG_DebugPrint("Detected " + IntegerToString(fvgCount) + " FVGs in total");
    int active_count = 0;
    for(int i = 0; i < fvgCount; i++) {
       if(fvgs[i].active) active_count++;
    }
-   Print("Active FVGs: ", active_count);
+   FVG_DebugPrint("Active FVGs: " + IntegerToString(active_count));
 }
 
 void PlotFVG(FVG &fvg, int index) {

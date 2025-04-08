@@ -18,6 +18,8 @@ input double InpMaxLotSize = 5.0;         // Maximum lot size (to prevent oversi
 input bool InpPlotGGs = true;             // Plot Guru Gaps
 input bool InpPlotTrades = true;          // Plot pattern trades
 input bool InpEnableRealTrading = true;   // Enable real trading (false = demo mode)
+input bool InpReverseSignal = false;      // Reverse the trade direction and levels
+input bool InpDebugMode = false;          // Enable debug output in logs
 
 // Global arrays to store GGs
 GG g_bullishGGs[];
@@ -39,6 +41,24 @@ string g_symbol;
 bool g_firstRun = true;
 
 //+------------------------------------------------------------------+
+//| Custom debug print function - only outputs when debug is enabled  |
+//+------------------------------------------------------------------+
+void DebugPrint(string message)
+{
+   if(InpDebugMode) {
+      Print(message);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Always print function - for critical messages regardless of debug |
+//+------------------------------------------------------------------+
+void InfoPrint(string message)
+{
+   Print(message);
+}
+
+//+------------------------------------------------------------------+
 //| Expert initialization function                                    |
 //+------------------------------------------------------------------+
 int OnInit()
@@ -48,15 +68,19 @@ int OnInit()
    
    // Check if the symbol is valid
    if(!SymbolSelect(g_symbol, true)) {
-      Print("Error: Cannot select symbol ", g_symbol);
+      InfoPrint("Error: Cannot select symbol " + g_symbol);
       return INIT_FAILED;
    }
+   
+   // Set debug mode for all modules to match our EA debug mode
+   GG_SetDebugMode(InpDebugMode);
+   Patterns_SetDebugMode(InpDebugMode);
    
    // Initialize trade object
    g_trade.SetExpertMagicNumber(123456); // Set a unique magic number for this EA
    g_trade.SetMarginMode();
    g_trade.SetTypeFillingBySymbol(g_symbol);
-   g_trade.LogLevel(LOG_LEVEL_ALL);  // Log all messages to help debugging
+   g_trade.LogLevel(InpDebugMode ? LOG_LEVEL_ALL : LOG_LEVEL_ERRORS);  // Only detailed logs in debug mode
    
    // Set the risk:reward ratio
    SetRiskRewardRatio(InpRiskRewardRatio);
@@ -84,10 +108,11 @@ int OnInit()
    // Set up a timer to update GGs periodically (every 5 minutes)
    EventSetTimer(300);
    
-   Print("WGD-Bot initialized successfully for symbol: ", g_symbol);
-   Print("Trading is ", (InpEnableRealTrading ? "ENABLED" : "DISABLED (Demo Mode)"));
-   Print("Each new pattern will be traded once when detected");
-   Print("Maximum lot size set to ", InpMaxLotSize);
+   InfoPrint("WGD-Bot initialized successfully for symbol: " + g_symbol);
+   InfoPrint("Trading is " + (InpEnableRealTrading ? "ENABLED" : "DISABLED (Demo Mode)"));
+   InfoPrint("Each new pattern will be traded once when detected");
+   InfoPrint("Maximum lot size set to " + DoubleToString(InpMaxLotSize, 2));
+   InfoPrint("Debug mode is " + (InpDebugMode ? "ENABLED" : "DISABLED"));
    
    return(INIT_SUCCEEDED);
 }
@@ -103,7 +128,7 @@ void OnDeinit(const int reason)
    // Kill the timer
    EventKillTimer();
    
-   Print("WGD-Bot stopped");
+   InfoPrint("WGD-Bot stopped");
 }
 
 //+------------------------------------------------------------------+
@@ -173,7 +198,7 @@ void OnTick()
          g_firstRun = false;
          // Store all current patterns as processed to avoid trading historical patterns
          StoreCurrentPatternsAsProcessed();
-         Print("Initial patterns stored as processed - will only trade new patterns from now on");
+         DebugPrint("Initial patterns stored as processed - will only trade new patterns from now on");
       }
       
       // Refresh the chart
@@ -206,7 +231,8 @@ void StoreCurrentPatternsAsProcessed()
       g_processedBearishTrades[g_processedBearishCount++] = trade.time;
    }
    
-   Print("Stored ", g_processedBullishCount, " bullish and ", g_processedBearishCount, " bearish patterns as already processed");
+   DebugPrint("Stored " + IntegerToString(g_processedBullishCount) + " bullish and " + 
+             IntegerToString(g_processedBearishCount) + " bearish patterns as already processed");
 }
 
 //+------------------------------------------------------------------+
@@ -346,12 +372,12 @@ void ProcessNewTrades()
       
       // Skip historical patterns on first run
       if(g_firstRun) {
-         Print("Skipping bullish pattern on startup: ", TimeToString(trade.time));
+         DebugPrint("Skipping bullish pattern on startup: " + TimeToString(trade.time));
          continue;
       }
       
       // This is a new pattern, execute it
-      Print("Trading NEW bullish pattern: ", TimeToString(trade.time));
+      InfoPrint("Trading NEW bullish pattern: " + TimeToString(trade.time));
       ExecuteTrade(trade, true);
       
       // Add to processed list to avoid duplicate trading
@@ -370,12 +396,12 @@ void ProcessNewTrades()
       
       // Skip historical patterns on first run
       if(g_firstRun) {
-         Print("Skipping bearish pattern on startup: ", TimeToString(trade.time));
+         DebugPrint("Skipping bearish pattern on startup: " + TimeToString(trade.time));
          continue;
       }
       
       // This is a new pattern, execute it
-      Print("Trading NEW bearish pattern: ", TimeToString(trade.time));
+      InfoPrint("Trading NEW bearish pattern: " + TimeToString(trade.time));
       ExecuteTrade(trade, false);
       
       // Add to processed list to avoid duplicate trading
@@ -403,15 +429,15 @@ double CalculateLotSize(double entryPrice, double stopLoss, double riskPercentag
    double pointSize = SymbolInfoDouble(g_symbol, SYMBOL_POINT);
    
    // Debug info
-   Print("Risk calculation parameters: Balance=", DoubleToString(balance, 2), 
-         ", Risk Pips=", DoubleToString(riskPips, 5),
-         ", Point=", DoubleToString(pointSize, 5),
-         ", Tick Size=", DoubleToString(tickSize, 5),
-         ", Tick Value=", DoubleToString(tickValue, 5));
+   DebugPrint("Risk calculation parameters: Balance=" + DoubleToString(balance, 2) + 
+         ", Risk Pips=" + DoubleToString(riskPips, 5) +
+         ", Point=" + DoubleToString(pointSize, 5) +
+         ", Tick Size=" + DoubleToString(tickSize, 5) +
+         ", Tick Value=" + DoubleToString(tickValue, 5));
    
    // Avoid division by zero
    if(riskPips <= 0 || tickValue <= 0 || tickSize <= 0) {
-      Print("Warning: Invalid risk calculation parameters");
+      InfoPrint("Warning: Invalid risk calculation parameters");
       return 0.1; // Return minimum default lot size
    }
    
@@ -423,7 +449,7 @@ double CalculateLotSize(double entryPrice, double stopLoss, double riskPercentag
    
    // Avoid division by zero
    if(costPerLot <= 0) {
-      Print("Warning: Cost per lot calculation resulted in zero or negative value");
+      InfoPrint("Warning: Cost per lot calculation resulted in zero or negative value");
       return 0.1; // Return minimum default lot size
    }
    
@@ -442,10 +468,10 @@ double CalculateLotSize(double entryPrice, double stopLoss, double riskPercentag
    lotSize = MathFloor(lotSize / lotStep) * lotStep;
    lotSize = MathMax(minLot, MathMin(maxLot, lotSize));
    
-   Print("Calculated lot size: ", DoubleToString(lotSize, 2), 
-         " (Min: ", DoubleToString(minLot, 2),
-         ", Max: ", DoubleToString(maxLot, 2),
-         ", Step: ", DoubleToString(lotStep, 2), ")");
+   DebugPrint("Calculated lot size: " + DoubleToString(lotSize, 2) + 
+         " (Min: " + DoubleToString(minLot, 2) +
+         ", Max: " + DoubleToString(maxLot, 2) +
+         ", Step: " + DoubleToString(lotStep, 2) + ")");
    
    return lotSize;
 }
@@ -455,10 +481,18 @@ double CalculateLotSize(double entryPrice, double stopLoss, double riskPercentag
 //+------------------------------------------------------------------+
 void ExecuteTrade(TradeSetup &trade, bool isBullish)
 {
+   // Reverse the trade direction and levels if reverseSignal is true
+   if(InpReverseSignal) {
+      isBullish = !isBullish; // Flip the direction
+      double tempSL = trade.sl;
+      trade.sl = trade.tp; // Swap SL and TP
+      trade.tp = tempSL;
+   }
+
    // Skip trades if no risk-reward (likely a data or calculation error)
    if(MathAbs(trade.entry - trade.sl) < 0.0000001 || 
       MathAbs(trade.tp - trade.entry) < 0.0000001) {
-      Print("Skipping invalid trade setup - zero risk or reward");
+      InfoPrint("Skipping invalid trade setup - zero risk or reward");
       return;
    }
    
@@ -470,7 +504,7 @@ void ExecuteTrade(TradeSetup &trade, bool isBullish)
    
    // If lot size calculation failed or returned zero
    if(lotSize <= 0) {
-      Print("Error calculating lot size. Trade aborted.");
+      InfoPrint("Error calculating lot size. Trade aborted.");
       return;
    }
    
@@ -479,16 +513,17 @@ void ExecuteTrade(TradeSetup &trade, bool isBullish)
    
    // Print trade info
    string tradeInfo = StringFormat(
-      "Executing %s trade: Pattern %s, Entry: %g, SL: %g, TP: %g, Lot Size: %g",
+      "Executing %s trade: Pattern %s, Entry: %g, SL: %g, TP: %g, Lot Size: %g%s",
       isBullish ? "BULLISH" : "BEARISH",
       trade.type,
       currentPrice,  // Using current market price for display
       trade.sl,
       trade.tp,
-      lotSize
+      lotSize,
+      InpReverseSignal ? " (Reversed Signal)" : ""
    );
    
-   Print("⚡ NEW TRADE ⚡ - ", tradeInfo);
+   InfoPrint("⚡ NEW TRADE ⚡ - " + tradeInfo);
    
    // Execute the trade if real trading is enabled
    if(InpEnableRealTrading) {
@@ -503,22 +538,24 @@ void ExecuteTrade(TradeSetup &trade, bool isBullish)
       );
       
       if(result) {
-         Print("✅ Trade executed successfully: Deal #", g_trade.ResultDeal(), 
-               ", Order #", g_trade.ResultOrder());
+         InfoPrint("✅ Trade executed successfully: Deal #" + IntegerToString(g_trade.ResultDeal()) + 
+               ", Order #" + IntegerToString(g_trade.ResultOrder()));
       } else {
-         Print("❌ Failed to execute trade: Error #", g_trade.ResultRetcode(), 
-               " - ", g_trade.ResultRetcodeDescription());
+         string errorMessage = "❌ Failed to execute trade: Error #" + IntegerToString(g_trade.ResultRetcode()) + 
+               " - " + g_trade.ResultRetcodeDescription();
+         InfoPrint(errorMessage);
          
          // More detailed error information
-         Print("Additional error details:", 
-               " Symbol:", g_symbol,
-               " Type:", EnumToString(orderType),
-               " Volume:", DoubleToString(lotSize, 2),
-               " Price:", DoubleToString(currentPrice, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
-               " SL:", DoubleToString(trade.sl, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)),
-               " TP:", DoubleToString(trade.tp, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)));
+         string details = "Additional error details:" + 
+               " Symbol:" + g_symbol +
+               " Type:" + EnumToString(orderType) +
+               " Volume:" + DoubleToString(lotSize, 2) +
+               " Price:" + DoubleToString(currentPrice, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)) +
+               " SL:" + DoubleToString(trade.sl, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS)) +
+               " TP:" + DoubleToString(trade.tp, (int)SymbolInfoInteger(g_symbol, SYMBOL_DIGITS));
+         InfoPrint(details);
       }
    } else {
-      Print("🔄 Trade SIMULATED (Demo Mode): ", tradeInfo);
+      InfoPrint("🔄 Trade SIMULATED (Demo Mode): " + tradeInfo);
    }
 }

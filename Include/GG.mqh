@@ -3,6 +3,9 @@
 
 #include <FVG.mqh>
 
+// Debug mode flag - can be set by the calling code
+static bool g_GG_DebugMode = false;
+
 // Use enum instead of strings for better performance
 enum FVG_TYPE {
    FVG_BULLISH,
@@ -29,6 +32,38 @@ struct GG {
    datetime ltf_start_time; // Start time of the lower timeframe FVG
 };
 
+//+------------------------------------------------------------------+
+//| Set debug mode for GG module                                      |
+//+------------------------------------------------------------------+
+void GG_SetDebugMode(bool debugMode) {
+   g_GG_DebugMode = debugMode;
+   // Also set debug mode for the FVG module
+   FVG_SetDebugMode(debugMode);
+}
+
+//+------------------------------------------------------------------+
+//| Get current debug mode state                                      |
+//+------------------------------------------------------------------+
+bool GG_GetDebugMode() {
+   return g_GG_DebugMode;
+}
+
+//+------------------------------------------------------------------+
+//| Custom debug print function - only outputs when debug is enabled  |
+//+------------------------------------------------------------------+
+void GG_DebugPrint(string message) {
+   if(g_GG_DebugMode) {
+      Print(message);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Always print function - for critical messages regardless of debug |
+//+------------------------------------------------------------------+
+void GG_InfoPrint(string message) {
+   Print(message);
+}
+
 // Detect Guru's Gaps (GG) - Intersections between HTF and LTF FVGs of the same type
 void DetectGuruGaps(string symbol, GG &ggs[], int &ggCount, 
                       ENUM_TIMEFRAMES htf = PERIOD_H1, 
@@ -43,16 +78,16 @@ void DetectGuruGaps(string symbol, GG &ggs[], int &ggCount,
    // Step 1: Detect all HTF FVGs
    FVG htf_fvgs[];
    int htf_fvgCount = 0;
-   Print("Detecting HTF FVGs...");
+   GG_DebugPrint("Detecting HTF FVGs...");
    DetectFVGs(symbol, htf, htf_fvgs, htf_fvgCount, days_to_look_back);
-   Print("Detected ", htf_fvgCount, " HTF FVGs");
+   GG_DebugPrint("Detected " + IntegerToString(htf_fvgCount) + " HTF FVGs");
    
    // Step 2: Detect all LTF FVGs
    FVG ltf_fvgs[];
    int ltf_fvgCount = 0;
-   Print("Detecting LTF FVGs...");
+   GG_DebugPrint("Detecting LTF FVGs...");
    DetectFVGs(symbol, ltf, ltf_fvgs, ltf_fvgCount, days_to_look_back);
-   Print("Detected ", ltf_fvgCount, " LTF FVGs");
+   GG_DebugPrint("Detected " + IntegerToString(ltf_fvgCount) + " LTF FVGs");
    
    // Pre-allocate array for GGs (estimated size)
    int estimated_ggs = MathMin(htf_fvgCount, ltf_fvgCount);
@@ -60,7 +95,7 @@ void DetectGuruGaps(string symbol, GG &ggs[], int &ggCount,
    ggCount = 0;
    
    // Step 3: Find intersections between HTF and LTF FVGs (Guru Gaps)
-   Print("Finding Guru Gaps (intersections)...");
+   GG_DebugPrint("Finding Guru Gaps (intersections)...");
    for(int h = 0; h < htf_fvgCount; h++) {
       for(int l = 0; l < ltf_fvgCount; l++) {
          // Only process FVGs of the same type
@@ -125,9 +160,9 @@ void DetectGuruGaps(string symbol, GG &ggs[], int &ggCount,
    int copied = CopyRates(symbol, ltf, 0, bars_to_load, rates);
    
    if(copied <= 0) {
-      Print("Error copying rates data for GG closure checking: ", GetLastError());
+      GG_InfoPrint("Error copying rates data for GG closure checking: " + IntegerToString(GetLastError()));
    } else {
-      Print("Checking closures for ", ggCount, " Guru Gaps...");
+      GG_DebugPrint("Checking closures for " + IntegerToString(ggCount) + " Guru Gaps...");
       
       // Process GG closures
       for(int g = 0; g < ggCount; g++) {
@@ -139,6 +174,7 @@ void DetectGuruGaps(string symbol, GG &ggs[], int &ggCount,
             // Process each bar from GG start to current time
             for(int i = start_bar; i >= 0; i--) {
                double close = rates[i].close;
+               double previous_close = rates[i+1].close;
                datetime time = rates[i].time;
                
                // Update end time for active GGs
@@ -147,12 +183,12 @@ void DetectGuruGaps(string symbol, GG &ggs[], int &ggCount,
                }
                
                // Check if this candle closes the GG
-               if(ggs[g].type == "Bullish" && close < ggs[g].low) {
+               if(ggs[g].type == "Bullish" && previous_close < ggs[g].low) {
                   ggs[g].active = false;
                   ggs[g].end_time = time;
                   break; // No need to check further bars
                }
-               else if(ggs[g].type == "Bearish" && close > ggs[g].high) {
+               else if(ggs[g].type == "Bearish" && previous_close > ggs[g].high) {
                   ggs[g].active = false;
                   ggs[g].end_time = time;
                   break; // No need to check further bars
@@ -162,7 +198,7 @@ void DetectGuruGaps(string symbol, GG &ggs[], int &ggCount,
       }
    }
    
-   Print("Detected ", ggCount, " Guru Gaps in total");
+   GG_DebugPrint("Detected " + IntegerToString(ggCount) + " Guru Gaps in total");
 }
 
 void PlotGG(GG &gg, int index) {
