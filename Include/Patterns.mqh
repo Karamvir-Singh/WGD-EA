@@ -1,5 +1,38 @@
 #include <GG.mqh>
 
+// Debug mode flag - can be set by the calling code
+static bool g_Patterns_DebugMode = false;
+
+//+------------------------------------------------------------------+
+//| Set debug mode for Patterns module                                |
+//+------------------------------------------------------------------+
+void Patterns_SetDebugMode(bool debugMode) {
+   g_Patterns_DebugMode = debugMode;
+}
+
+//+------------------------------------------------------------------+
+//| Get current debug mode state                                      |
+//+------------------------------------------------------------------+
+bool Patterns_GetDebugMode() {
+   return g_Patterns_DebugMode;
+}
+
+//+------------------------------------------------------------------+
+//| Custom debug print function - only outputs when debug is enabled  |
+//+------------------------------------------------------------------+
+void Patterns_DebugPrint(string message) {
+   if(g_Patterns_DebugMode) {
+      Print(message);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Always print function - for critical messages regardless of debug |
+//+------------------------------------------------------------------+
+void Patterns_InfoPrint(string message) {
+   Print(message);
+}
+
 // Structure to hold trade setup information for a reversal pattern
 struct TradeSetup {
    datetime time;         // Time of the trade
@@ -138,7 +171,7 @@ void FindGGReversalPatternTrades(string symbol, GG &bullish_GGs[], int bullish_c
    // Load price data
    int bars_needed = CopyRates(symbol, PERIOD_CURRENT, 0, lookBackDays * 24 * 60, rates);
    if(bars_needed <= 0) {
-      Print("Error copying rates data: ", GetLastError());
+      Patterns_InfoPrint("Error copying rates data: " + IntegerToString(GetLastError()));
       return;
    }
    
@@ -148,7 +181,7 @@ void FindGGReversalPatternTrades(string symbol, GG &bullish_GGs[], int bullish_c
    double currentSpread = askPrice - bidPrice;
    
    // Iterate through price data starting from second candle
-   for(int i = 1; i < bars_needed - 1; i++) {
+   for(int i = 1; i < 10; i++) {
       // Current and previous candle data
       MqlRates current = rates[i];
       MqlRates previous = rates[i+1]; // Note: rates are in reverse chronological order
@@ -166,7 +199,7 @@ void FindGGReversalPatternTrades(string symbol, GG &bullish_GGs[], int bullish_c
       // Check bearish patterns against bearish GGs
       for(int g = 0; g < bearish_count; g++) {
          // Skip inactive GGs or GGs not within the current timeframe
-         if(//!bearish_GGs[g].active || 
+         if(!bearish_GGs[g].active || 
             current.time < bearish_GGs[g].start_time || 
             current.time > bearish_GGs[g].end_time) {
             continue;
@@ -245,7 +278,7 @@ void FindGGReversalPatternTrades(string symbol, GG &bullish_GGs[], int bullish_c
       // Check bullish patterns against bullish GGs
       for(int g = 0; g < bullish_count; g++) {
          // Skip inactive GGs or GGs not within the current timeframe
-         if(//!bullish_GGs[g].active || 
+         if(!bullish_GGs[g].active || 
             current.time < bullish_GGs[g].start_time || 
             current.time > bullish_GGs[g].end_time) {
             continue;
@@ -322,7 +355,8 @@ void FindGGReversalPatternTrades(string symbol, GG &bullish_GGs[], int bullish_c
       }
    }
    
-   Print("Found ", g_BearishTradeCount, " bearish and ", g_BullishTradeCount, " bullish pattern trades");
+   Patterns_DebugPrint("Found " + IntegerToString(g_BearishTradeCount) + " bearish and " + 
+                     IntegerToString(g_BullishTradeCount) + " bullish pattern trades");
 }
 
 //+------------------------------------------------------------------+
